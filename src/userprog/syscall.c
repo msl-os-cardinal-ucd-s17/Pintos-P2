@@ -7,6 +7,9 @@
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
 #include "lib/user/syscall.h"
+#include "threads/malloc.h"
+#include "threads/palloc.h"
+#include "filesys/filesys.h"
 
 static void syscall_handler (struct intr_frame *);
 bool verify_user_ptr(void*vaddr);
@@ -16,6 +19,40 @@ int system_open(const char *file);
 void system_close(int fd);
 int system_write(int fd, const void *buffer, unsigned size);
 pid_t system_exec(const char*cmd_line);
+
+static struct fd_elem* find_fd(int fd);
+static int next_fd(void);
+
+typedef struct fd_elem fd_entry;
+
+struct fd_elem{
+   int fd;
+   struct file* file;
+   struct list_elem elem;
+};
+
+
+// Check current thread's list of open files for fd
+static struct fd_elem* find_fd(int fd){
+   struct list_elem *e;
+   struct fd_elem *fde = NULL;
+   struct list *fd_elems = &thread_current()->fd_list;
+
+   for (e = list_begin(fd_elems); e != list_end(fd_elems); e = list_next(e)){
+      struct fd_elem *t = list_entry (e, struct fd_elem, elem);
+      if (t->fd == fd){
+         fde = t;
+         break;
+      }
+   }
+
+   return fde;
+}
+
+static int next_fd(void){
+   return thread_current()->fd_count++;
+}
+
 
 void
 syscall_init (void) 
@@ -50,15 +87,13 @@ int system_open(const char *file){
    }
 
    // Create new file descriptor
-   struct fd_elem *fde = malloc(sizeof(struct fd_elem));
+   struct fd_elem *fde = malloc (sizeof(struct fd_elem));
    if (fde == NULL){
       return -1;
    }
 
    // Increment file descriptor
-   fde->fd = thread_current()->fd_count;
-   // Adjust thread fd counter
-   thread_current()->fd_count += 1;
+   fde->fd = next_fd(); 
    // Save file with fd struct
    fde->file = f;
    // Add to threads open file list
@@ -99,7 +134,7 @@ int system_write(int fd, const void *buffer, unsigned size){
    }
    // Write to file
    if (find_fd(fd) != NULL){
-      int bytes_written = write_file(find_fd(fd)->file, buffer, size);
+      int bytes_written = file_write(find_fd(fd)->file, buffer, size);
       return bytes_written;
    }
    else {

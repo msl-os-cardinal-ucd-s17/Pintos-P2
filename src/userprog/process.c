@@ -19,32 +19,6 @@
 #include "threads/vaddr.h"
 
 
-// File Descriptor
-struct fd_elem{
-   int fd;
-   struct file* file;
-   struct list_elem elem;
-}
-
-
-// Check current thread's list of open files for fd
-struct fd_elem* find_fd(int fd){
-   struct list_elem *e;
-   struct fd_elem *fde = NULL;
-   struct list *fd_elems = &thread_current()->fd_list;
-   
-   for (e = list_begin(fd_elems); e != list_end(fd_elems); e = list_next(e)){
-      struct fd_elem *t = list_entry (e, struct fd_elem, elem);
-      if (t->fd == fd){
-         fde = t;
-         break;
-      }
-   }
-
-   return fde;
-}
-
-
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
