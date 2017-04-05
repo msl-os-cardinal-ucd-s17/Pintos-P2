@@ -54,6 +54,10 @@ static int next_fd(void){
 }
 
 
+=======
+pid_t system_exec(const char*cmd_line);
+
+>>>>>>> origin/master
 void
 syscall_init (void) 
 {
@@ -77,6 +81,7 @@ void system_halt(void) {
 }
 
 void system_exit(int status) {
+<<<<<<< HEAD
         thread_exit();
 }
 
@@ -141,6 +146,7 @@ int system_write(int fd, const void *buffer, unsigned size){
       // File not found
       return -1;
    }
+	thread_exit();
 }
 
 pid_t system_exec(const char*cmd_line){
@@ -156,5 +162,4 @@ bool verify_user_ptr(void *vaddr) {
 
 	return (isValid);
 }
-
 
