@@ -11,10 +11,20 @@
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
 
+#define arg0    ((f->esp)-4)
+#define arg1	((f->esp)-8)
+#define arg2	((f->esp)-12)
+#include "threads/malloc.h"
+#include "threads/palloc.h"
+#include "filesys/filesys.h"
 static void syscall_handler (struct intr_frame *);
 bool verify_user_ptr(void*vaddr);
 void system_halt(void);
 void system_exit(int status);
+int system_open(const char *file);
+void system_close(int fd);
+int system_write(int fd, const void *buffer, unsigned size);
+pid_t system_exec(const char*cmd_line);
 int system_open(const char *file);
 void system_close(int fd);
 int system_write(int fd, const void *buffer, unsigned size);
@@ -54,10 +64,41 @@ static int next_fd(void){
 }
 
 
-=======
-pid_t system_exec(const char*cmd_line);
+static struct fd_elem* find_fd(int fd);
+static int next_fd(void);
 
->>>>>>> origin/master
+typedef struct fd_elem fd_entry;
+
+struct fd_elem{
+   int fd;
+   struct file* file;
+   struct list_elem elem;
+};
+
+
+// Check current thread's list of open files for fd
+static struct fd_elem* find_fd(int fd){
+   struct list_elem *e;
+   struct fd_elem *fde = NULL;
+   struct list *fd_elems = &thread_current()->fd_list;
+
+   for (e = list_begin(fd_elems); e != list_end(fd_elems); e = list_next(e)){
+      struct fd_elem *t = list_entry (e, struct fd_elem, elem);
+      if (t->fd == fd){
+         fde = t;
+         break;
+      }
+   }
+
+   return fde;
+}
+
+static int next_fd(void){
+   return thread_current()->fd_count++;
+}
+
+
+
 void
 syscall_init (void) 
 {
@@ -68,10 +109,43 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  printf ("system call!\n");
   //Verify that the user provided virtual address is valid
   if(verify_user_ptr(f->esp)) {
+  	  printf ("system call number: %d\n", *((int*) f->esp));
 
+  	//Retrieve and handle the System call NUMBER fromt the User Stack
+  	switch(*((int*) f->esp)) {
+  		case SYS_HALT:
+  			system_halt();
+  			break;
+  		case SYS_EXIT:
+  			system_exit(*((int*)arg0));
+  			break;
+  		case SYS_EXEC:
+  			break;
+  		case SYS_WAIT:
+  			break;
+  		case SYS_CREATE:
+  			break;
+  		case SYS_REMOVE:
+  			break;
+  		case SYS_OPEN:
+  			break;
+  		case SYS_FILESIZE:
+  			break;
+  		case SYS_READ:
+  			break;
+  		case SYS_WRITE:
+  			break;
+  		case SYS_SEEK:
+  			break;
+  		case SYS_TELL:
+  			break;
+  		case SYS_CLOSE:
+  			break;
+		default:
+			break;
+  	}
   }
   thread_exit ();
 }
@@ -81,8 +155,7 @@ void system_halt(void) {
 }
 
 void system_exit(int status) {
-<<<<<<< HEAD
-        thread_exit();
+    thread_exit();
 }
 
 int system_open(const char *file){
@@ -146,7 +219,6 @@ int system_write(int fd, const void *buffer, unsigned size){
       // File not found
       return -1;
    }
-	thread_exit();
 }
 
 pid_t system_exec(const char*cmd_line){
@@ -156,7 +228,7 @@ pid_t system_exec(const char*cmd_line){
 
 bool verify_user_ptr(void *vaddr) {
 	bool isValid = 1;
-	if(is_user_vaddr(vaddr) || (vaddr < ((void*)LOWEST_USER_VADDR))){
+	if(is_user_vaddr(vaddr) && (vaddr < ((void*)LOWEST_USER_VADDR))){
 		isValid = 0;	
 	}
 
