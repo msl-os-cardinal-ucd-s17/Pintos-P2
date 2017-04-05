@@ -107,8 +107,10 @@ syscall_init (void)
 }
 
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+syscall_handler (struct intr_frame *f) 
 {
+  int call_status = -1;
+
   //Verify that the user provided virtual address is valid
   if(verify_user_ptr(f->esp)) {
   	  printf ("system call number: %d\n", *((int*) f->esp));
@@ -119,8 +121,11 @@ syscall_handler (struct intr_frame *f UNUSED)
   			system_halt();
   			break;
   		case SYS_EXIT:
-  			system_exit(*((int*)arg0));
-  			break;
+			if (verify_user_ptr(f->esp + 4)){
+				system_exit(*((int *)f->esp + 4));
+				call_status = 0;	
+			}
+			break;
   		case SYS_EXEC:
   			break;
   		case SYS_WAIT:
@@ -130,12 +135,23 @@ syscall_handler (struct intr_frame *f UNUSED)
   		case SYS_REMOVE:
   			break;
   		case SYS_OPEN:
+			if (verify_user_ptr(f->esp + 4)){
+                                system_open(*((int *)f->esp + 4));
+                                call_status = 0;
+                        }
   			break;
   		case SYS_FILESIZE:
   			break;
   		case SYS_READ:
   			break;
   		case SYS_WRITE:
+			if (verify_user_ptr(f->esp + 4)){
+				if (verify_user_ptr(f->esp + 8)){
+					if (verify_user_ptr(f->esp + 12)){
+						call_status = system_write(*((int *)f->esp + 4), *((int *)f->esp + 8), *((int *)f->esp + 12));
+					}
+				}
+                        }
   			break;
   		case SYS_SEEK:
   			break;
@@ -147,7 +163,10 @@ syscall_handler (struct intr_frame *f UNUSED)
 			break;
   	}
   }
-  thread_exit ();
+  
+  if (call_status == -1){
+  	thread_exit ();
+  }
 }
 
 void system_halt(void) {
