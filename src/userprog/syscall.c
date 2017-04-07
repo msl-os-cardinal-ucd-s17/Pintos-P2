@@ -14,6 +14,7 @@
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
+
 static void syscall_handler (struct intr_frame *);
 bool verify_user_ptr(void*vaddr);
 void system_halt(void);
@@ -23,6 +24,7 @@ int system_open(const char *file);
 void system_close(int fd);
 int system_write(int fd, const void *buffer, unsigned size);
 pid_t system_exec(const char*cmd_line);
+static int get_user(const uint8_t*uaddr);
 
 static struct fd_elem* find_fd(int fd);
 static int next_fd(void);
@@ -68,9 +70,13 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
+	int* ptr = (int*) pagedir_get_page (thread_current()->pagedir, f->esp);
   //Verify that the user provided virtual address is valid
   if(verify_user_ptr(f->esp)) {
-  	  printf ("system call number: %d\n", *((int*) f->esp));
+  	  printf("pointer address: %p\n", f->esp);
+  	  printf("Data at esp: %d\n", *((int*)(f->esp + -1)));
+  	  printf("Physical Address:%p\n", ptr);
+  	  printf("Data at address: %d\n", *(ptr + 0));
 
   	//Retrieve and handle the System call NUMBER fromt the User Stack
   	switch(*((int*) f->esp)) {
@@ -194,3 +200,9 @@ bool verify_user_ptr(void *vaddr) {
 	return (isValid);
 }
 
+static int get_user(const uint8_t*uaddr) {
+	int result;
+	asm ("movl $1f, %0; movzbl %1, %0; 1:"
+	: "=&a" (result) : "m" (*uaddr));
+	return result;
+}
