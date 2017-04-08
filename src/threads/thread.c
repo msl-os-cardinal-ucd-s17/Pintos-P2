@@ -86,6 +86,8 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+struct thread *get_thread(tid_t tid); /* Get thread by tid from all_list */
+struct thread *get_child(tid_t tid); /* Get thread by tid from thread's child_list */
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -903,3 +905,43 @@ verify_current_thread_highest ()
 int returnLoadAverage(){
   return load_average.value;
 }
+
+/* Get thread by thread ID
+   Necessary for updating variables for threads other than thread_current
+   Returns null if tid doesn't exist in alL_list
+*/
+struct thread *get_thread(tid_t tid){
+  struct list_elem *e;
+  struct thread *found_thread = NULL;
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)){
+    struct thread *t = list_entry (e, struct thread, allelem);
+    if (tid == t->tid){
+      found_thread = t;
+      break;
+    }
+  }
+
+  intr_set_level (old_level);
+  return found_thread;
+}
+
+/* Get child thread from child_list by thread ID
+   Returns null if tid doesn't exist in current thread's child list
+*/
+struct thread *get_child(tid_t tid){
+  struct list_elem *e;
+  struct thread *t = thread_current();
+  
+  for (e = list_begin (&t->child_list); e != list_end (&t->child_list); e = list_next (e)){
+    struct thread *child_thread = list_entry (e, struct thread, child_elem);
+    if (child_thread->tid == tid){
+      return child_thread;
+    }
+  }
+  
+  return NULL;
+}
+

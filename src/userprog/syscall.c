@@ -25,10 +25,9 @@ int system_open(const char *file);
 void system_close(int fd);
 int system_write(int fd, const void *buffer, unsigned size);
 pid_t system_exec(const char*cmd_line);
-int system_open(const char *file);
-void system_close(int fd);
-int system_write(int fd, const void *buffer, unsigned size);
-pid_t system_exec(const char*cmd_line);
+int system_wait(pid_t pid);
+int system_filesize(int fd);
+
 
 static struct fd_elem* find_fd(int fd);
 static int next_fd(void);
@@ -92,8 +91,14 @@ syscall_handler (struct intr_frame *f)
 			}
 			break;
   		case SYS_EXEC:
+			if (verify_user_ptr(arg0)){
+				call_status = system_exec((const char *)arg0);
+			}
   			break;
   		case SYS_WAIT:
+			if (verify_user_ptr(arg0)){
+				call_status = system_wait(*(int *)arg0);
+			}
   			break;
   		case SYS_CREATE:
   			break;
@@ -106,6 +111,9 @@ syscall_handler (struct intr_frame *f)
                         }
   			break;
   		case SYS_FILESIZE:
+			if (verify_user_ptr(arg0)){
+				call_status = system_filesize(*(int *)arg0);
+			}
   			break;
   		case SYS_READ:
   			break;
@@ -135,6 +143,9 @@ syscall_handler (struct intr_frame *f)
   if (call_status == -1){
   	thread_exit ();
   }
+
+  f->eax = call_status;
+
 }
 
 void system_halt(void) {
@@ -142,7 +153,47 @@ void system_halt(void) {
 }
 
 void system_exit(int status) {
-    thread_exit();
+    	struct thread *t = thread_current();
+	printf("%s: exit(%d)\n", t->name, status);
+
+	struct list_elem *e;
+
+	/* Check for dead children*/
+	for (e = list_begin(&t->child_list); e != list_end(&t->child_list);){
+		struct thread *child = list_entry(e, struct thread, child_elem);
+		child->parent_alive = false;
+		/* If child isn't alive, free memory */
+		if (!child->alive){
+			e = list_remove(&child->child_elem);
+			free(child);
+		}
+		else{
+			e = list_next(e);
+		}
+	}
+	
+	/* If parent is alive, update thread's status and signal parent with sema_up */
+	if (t->parent_alive){
+		t->alive = false;
+		t->exit_status = status;
+		sema_up(&t->wait_sema);
+	}
+	else {
+		/* If parent is dead, free memory */
+		list_remove(&t->child_elem);
+		free(t);
+	}
+
+	/* Free files */
+	for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list);){
+		struct fd_elem *fde = list_entry(e, struct fd_elem, elem);
+		file_close(fde->file);
+		e = list_remove(&fde->elem);
+		free(fde);
+	}
+
+	/* Lastly, call thread exit */
+	thread_exit();
 }
 
 int system_open(const char *file){
@@ -209,8 +260,21 @@ int system_write(int fd, const void *buffer, unsigned size){
 }
 
 pid_t system_exec(const char*cmd_line){
-	pid_t id;
-	return(id);
+	pid_t id = process_execute(cmd_line);
+	return id;
+}
+
+int system_wait(pid_t pid){
+	int status = process_wait(pid);
+	return status;
+}
+
+int system_filesize(int fd){
+	if (find_fd(fd) != NULL){
+		struct fd_elem *fde = find_fd(fd);
+		return file_length(fde->file);
+	}
+	return -1;
 }
 
 bool verify_user_ptr(void *vaddr) {

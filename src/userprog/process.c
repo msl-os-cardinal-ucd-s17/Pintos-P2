@@ -18,7 +18,6 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -41,8 +40,25 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  if (tid == TID_ERROR){
+    palloc_free_page (fn_copy);
+    return -1;
+  } 
+
+  /* Update thread variables */
+  struct thread *t = get_thread(tid);
+  t->fd_count = 2;
+  list_init(&t->child_list);
+  list_init(&t->fd_list);
+
+  struct thread *child = get_child(tid);
+  sema_down(&child->load_sema);
+  
+  /* If child load status hasn't been set to true, didn't load successful - fail */
+  if (!child->load_status){
+    return TID_ERROR;
+  }
+
   return tid;
 }
 
@@ -62,10 +78,15 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  sema_up(&thread_current()->load_sema);
+  palloc_free_page(file_name);
+
+  if (success){
+    thread_current()->load_status = true;
+  }
+  else {
+    system_exit(-1);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -87,12 +108,19 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  //Getting minimal functionality to run tests (Suggested Order of Implementation)
-  while(1){
-    //
+  struct thread *child_thread = get_child(child_tid);  
+ 
+  /* Make sure it is a child and thread hasn't already waited for it */
+  if (child_thread != NULL && !child_thread->waited){
+    child_thread->waited = true;
+    if (&child_thread->wait_sema != NULL){
+      sema_down (&child_thread->wait_sema);
+    }
+    return child_thread->exit_status;
   }
+  
   return -1;
 }
 
@@ -102,6 +130,12 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* Close executable */
+  if (cur->executable){
+    file_close(cur->executable);
+    cur->executable = NULL;
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -136,7 +170,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -200,7 +234,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char **argv, int argc);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -219,6 +253,20 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+
+  /* Copy filename */
+  char fname_copy[100];
+  strlcpy(fname_copy, file_name, 100);
+  char *argv[50];
+  int argc; 
+
+  /* Extract arguments */
+  char *tmp, *token;
+  argv[0] = strtok_r(fname_copy, " ", &tmp);
+  argc = 1;
+  while ((t=strtok_r(NULL, " ", &tmp)) != NULL){
+    argv[argc++] = token;
+  }
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -307,7 +355,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, argv, argc))
     goto done;
 
   /* Start address. */
@@ -315,12 +363,19 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   success = true;
 
- done:
-  /* We arrive here whether the load is successful or not. */
-  file_close (file);
+ done:  /* We arrive here whether the load is successful or not. */
+  if (success){
+    thread_current()->executable = file;
+    /* Deny writes to executables */
+    file_deny_write(file); 
+  }
+  else {
+    /* Only close file if unsuccessful load - successful loads close file in process_exit */ 
+    file_close(file);
+  }
   return success;
 }
-
+
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
@@ -432,7 +487,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char **argv, int argc) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -441,8 +496,35 @@ setup_stack (void **esp)
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE -12;
+      if (success){
+        *esp = PHYS_BASE;
+        int tmp = argc;
+
+        uint32_t *args_array[argc];
+        while (--tmp >= 0){
+          *esp = *esp - (strlen(argv[tmp])+1)*sizeof(char);
+          args_array[tmp] = (uint32_t *)*esp;
+          memcpy(*esp, argv[tmp], strlen(argv[tmp])+1);
+        }
+
+        *esp = *esp - 4;
+        (*(int *)(*esp)) = 0;
+        
+        tmp = argc;
+        while (--tmp >= 0){
+          *esp = *esp - 4;
+          (*(uint32_t **)(*esp)) = args_array[tmp];
+        }
+
+        *esp = *esp - 4;
+        (*(uintptr_t **)(*esp)) = (*esp + 4);
+
+        *esp = *esp - 4;
+        *(int *)(* esp) = argc;
+
+        *esp = *esp - 4;
+        (*(int *)(*esp)) = 0;
+      }
       else
         palloc_free_page (kpage);
     }
