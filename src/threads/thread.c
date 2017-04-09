@@ -86,8 +86,10 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
 struct thread *get_thread(tid_t tid); /* Get thread by tid from all_list */
 struct thread *get_child(tid_t tid); /* Get thread by tid from thread's child_list */
+void init_synchronization(struct thread *t); /* Initialize synchronization variables */
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -118,6 +120,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
+  init_synchronization(initial_thread);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -207,6 +211,9 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+  /* Initialize synchronization variables */
+  init_synchronization(t);
 
   old_level = intr_disable();
 
@@ -945,3 +952,23 @@ struct thread *get_child(tid_t tid){
   return NULL;
 }
 
+/* Initialize synchronization variables for thread.
+   Used in thread_init and thread_create functions.
+*/
+void init_synchronization(struct thread *t){
+  t->alive = true;
+  t->parent_alive = true;
+  t->waited = false;
+  t->load_status = false;
+  t->exit_status = -1;
+  
+  list_init(&t->child_list);
+  sema_init(&t->wait_sema,0);
+  sema_init(&t->load_sema,0);
+ 
+
+  /* If current thread has initilized child list, insert child elem in list*/
+  if (&thread_current()->child_list != NULL){
+    list_push_back(&thread_current()->child_list, &t->child_elem);
+  }
+}
