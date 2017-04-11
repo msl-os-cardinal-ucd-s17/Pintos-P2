@@ -261,11 +261,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   int argc; 
 
   /* Extract arguments */
-  char *tmp, *token;
+  char *tmp, *tkn;
   argv[0] = strtok_r(fname_copy, " ", &tmp);
   argc = 1;
-  while ((t=strtok_r(NULL, " ", &tmp)) != NULL){
-    argv[argc++] = token;
+
+  while ((tkn=strtok_r(NULL, " ", &tmp)) != NULL){
+    argv[(argc)++] = tkn;
   }
 
   /* Allocate and activate page directory. */
