@@ -95,6 +95,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   		case SYS_REMOVE:
   			break;
   		case SYS_OPEN:
+			system_open((char*)arg0);
   			break;
   		case SYS_FILESIZE:
   			break;

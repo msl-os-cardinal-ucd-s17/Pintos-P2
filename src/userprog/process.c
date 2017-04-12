@@ -214,6 +214,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
+  printf("The file name is: %s", file_name); 
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -475,10 +476,10 @@ setup_stack (void **esp, char*file_name)
       memcpy(argv[index], token, (strlen(token) +1));
 
       //Assign one of the pointers in the arrary to the 
-      argv[++index] = *esp;
+      argv[++index] = *esp-1;
    }
 
-   //Align the stack pointer on a multiple of 4 (for faster access)
+   //Align the stack pointer on a multiple of 4 for the argument pointers (for faster access)
    int bytes_to_add = (size_t)(*esp) % 4;
    uint8_t word_align = 0;
 
@@ -493,9 +494,13 @@ setup_stack (void **esp, char*file_name)
    }
 
    //Write the pointers to the token strings to the stack
-   for(int i =0; i <= index; i++) {
-      //Copy the pointer to the token to the stack
-      memcpy(*esp, argv[i], sizeof(char*));
+   for(int i =(index+bytes_to_add); i >= 0; i++) { 
+     if(i <= index) { 
+      	//Copy the pointer to the token to the stack
+     	 memcpy(*esp, argv[i], sizeof(char*));
+     } else {
+	memcpy(*esp, NULL, sizeof(char*));
+     }
 
       //Increment the stack pointer past the string pointer
       *esp -= sizeof(char*) + 1; 
