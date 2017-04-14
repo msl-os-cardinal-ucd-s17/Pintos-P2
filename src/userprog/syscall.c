@@ -107,7 +107,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   if(verify_user_ptr(f->esp)) {
     // callNum = *((int*)f->esp); // get the call number
 
-    callNum = get_user(f->esp);
+    callNum = get_user((uint8_t *)f->esp);
 
   	// printf ("system call number: %d\n", callNum);
   	//Retrieve and handle the System call NUMBER fromt the User Stack
@@ -267,7 +267,7 @@ int system_read(int fd, void *buffer, unsigned size) {
     
     if (readFile != NULL) {
       lock_acquire(&file_lock);
-      int bytesRead = file_read(readFile, buffer, size); // need to synchronize calls to filesys code
+      int bytesRead = file_read(readFile, buffer, size);
       lock_release(&file_lock);
       return bytesRead;
     }
