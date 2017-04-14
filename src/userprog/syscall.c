@@ -8,15 +8,18 @@
 #include "devices/shutdown.h"
 #include "lib/user/syscall.h"
 
-#define arg0  ((f->esp)+4)
-#define arg1	((f->esp)+8)
-#define arg2	((f->esp)+12)
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "devices/input.h"
+
 static void syscall_handler (struct intr_frame *);
-// static int get_user (const uint8_t *uaddr);
+
+/* Helper functions */
+static int get_user (const uint8_t *uaddr); /* function to return a value from user virtual address space */
 bool verify_user_ptr(void*vaddr);
+void get_args(struct intr_frame *f, int *args, int argc);
 
 /* System call function prototypes */
 void system_halt(void);
@@ -33,6 +36,10 @@ void system_seek(int fd, unsigned position);
 unsigned system_tell(int fd);
 void system_close(int fd);
 
+#define ARG_MAX 3
+
+int syscall_args[ARG_MAX]; // three int array, for max number of arguments in syscall
+
 static struct fd_elem* find_fd(int fd);
 static int next_fd(void);
 
@@ -43,6 +50,9 @@ struct fd_elem{
    struct file* file;
    struct list_elem elem;
 };
+
+
+struct lock file_lock; // lock for synchronizing access to filesys functions 
 
 
 // Check current thread's list of open files for fd
@@ -79,64 +89,79 @@ syscall_init (void)
    Returns the byte value if successful, -1 if a segfault
    occured
  */
-
-// static int get_user (const uint8_t *uaddr)
-// {
-//   int result;
-//   asm ("movl $1f, %0; movzbl %1, %0; 1:"
-//         : "=&a" (result) : "m" (*uaddr));
-//   return result;
-// }
+static int get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+        : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
+
+  int callNum; // set up a local variable to hold the call number
+
   //Verify that the user provided virtual address is valid
   if(verify_user_ptr(f->esp)) {
-    int callNum; // set up a local variable to hold the call number
-    callNum = *((int*)f->esp);
+    // callNum = *((int*)f->esp); // get the call number
+
+    callNum = get_user(f->esp);
 
   	// printf ("system call number: %d\n", callNum);
   	//Retrieve and handle the System call NUMBER fromt the User Stack
   	switch(callNum) {
   		case SYS_HALT:
   			system_halt();
-  			break;
+        break;
   		case SYS_EXIT:
-  			system_exit(*(int*)arg0);
+        get_args(f, syscall_args, 1);
+  			system_exit(syscall_args[0]);
   			break;
   		case SYS_EXEC:
-        system_exec((char*)arg0);
+        get_args(f, syscall_args, 1);
+        f->eax = system_exec((char*)syscall_args[0]);
   			break;
   		case SYS_WAIT:
-        system_wait(*(pid_t*)arg0);
+        get_args(f, syscall_args, 1);
+        f->eax = system_wait(*(pid_t*)syscall_args[0]);
   			break;
   		case SYS_CREATE:
-        system_create((char*)arg0, *(unsigned*)arg1);
+        get_args(f, syscall_args, 2);
+        f->eax = system_create((char*)syscall_args[0], (unsigned)syscall_args[1]);
   			break;
   		case SYS_REMOVE:
-        system_remove((char*)arg0);
+        get_args(f, syscall_args, 1);
+        f->eax = system_remove((char*)syscall_args[0]);
   			break;
   		case SYS_OPEN:
-        system_open((char*)arg0);//(const char *file);
+        get_args(f, syscall_args, 1);
+        f->eax = system_open((char*)syscall_args[0]);//(const char *file);
   			break;
   		case SYS_FILESIZE:
-        system_filesize(*(int*)arg0);
+        get_args(f, syscall_args, 1);
+        f->eax = system_filesize(syscall_args[0]);
         break;
       case SYS_READ:
-        system_read(*(int*)arg0, arg1, *(unsigned*)arg2);
+        get_args(f, syscall_args, 3);
+        f->eax = system_read(syscall_args[0], (void *)syscall_args[1], (unsigned)syscall_args[2]);
   			break;
   		case SYS_WRITE:
-        system_write(*((int*)arg0), arg1, *((unsigned*)arg2));
+        get_args(f, syscall_args, 3);
+        f->eax = system_write(syscall_args[0], (void*)syscall_args[1], (unsigned)syscall_args[2]);
   			break;
   		case SYS_SEEK:
-        system_seek(*(int*)arg0, *(unsigned*)arg1);    
+        get_args(f, syscall_args, 2);
+        system_seek(syscall_args[0], (unsigned)syscall_args[1]);    
   			break;
   		case SYS_TELL:
-        system_tell(*(int*)arg0);
+        get_args(f, syscall_args, 1);
+        f->eax = system_tell(syscall_args[0]);
   			break;
   		case SYS_CLOSE:
-        system_close(*(int*)arg0); //(int fd);
+        get_args(f, syscall_args, 1);
+        system_close(syscall_args[0]);
   			break;
 		default:
 			break;
@@ -144,6 +169,9 @@ syscall_handler (struct intr_frame *f UNUSED)
   }
   thread_exit ();
 }
+
+
+/*************** Start of system call implementations *****************/
 
 void system_halt(void) {
   /* Terminates pintos */
@@ -164,19 +192,31 @@ pid_t system_exec(const char*cmd_line){
 
 int system_wait(pid_t pid) {
   printf("sys_wait not implemented");
+  return -1;
 }
 
 bool system_create(const char *file, unsigned initial_size) {
-  printf("sys_create not implemented");
-
+  
+  lock_acquire(&file_lock);
+  bool fileCreate = filesys_create (file, (off_t)initial_size);
+  lock_release(&file_lock);
+  return fileCreate;
 }
 
 bool system_remove(const char *file) {
-  printf("sys_remove not implemented");
+  
+  lock_acquire(&file_lock);
+  bool fileRemove = filesys_remove(file);
+  lock_release(&file_lock);
+  return fileRemove;
 }
 
 int system_open(const char *file){
+  
+   lock_acquire(&file_lock);
    struct file *f = filesys_open(file);
+   lock_release(&file_lock);
+   
    if (f == NULL){
       return -1;
    }
@@ -200,11 +240,41 @@ int system_open(const char *file){
 }
 
 int system_filesize(int fd) {
-  printf("sys_filesize not implemented");
+  // printf("sys_filesize not implemented");
+  struct file* file = find_fd(fd)->file;
+  
+  lock_acquire(&file_lock);
+  int size = (int)file_length (file);
+  lock_release(&file_lock);
+  return size;
 }
 
 int system_read(int fd, void *buffer, unsigned size) {
-  printf("sys_read not implemented");
+
+  // If fd == 0, read from keyboard
+  if (fd == STDIN_FILENO) {
+    uint8_t *tmp_buffer = (uint8_t *) buffer;
+    for(unsigned i = 0; i < size; i++) {
+      tmp_buffer[i] = input_getc();
+      // (uint8_t *) buffer[i] = input_getc();
+    }
+    return size;
+  }
+  
+  // Otherwise read from a file
+  else {
+    struct file* readFile = find_fd(fd)->file;
+    
+    if (readFile != NULL) {
+      lock_acquire(&file_lock);
+      int bytesRead = file_read(readFile, buffer, size); // need to synchronize calls to filesys code
+      lock_release(&file_lock);
+      return bytesRead;
+    }
+    else {
+      return -1; // file not found
+    }
+  }
 }
 
 int system_write(int fd, const void *buffer, unsigned size){
@@ -225,7 +295,9 @@ int system_write(int fd, const void *buffer, unsigned size){
    }
    // Write to file
    if (find_fd(fd) != NULL){
+      lock_acquire(&file_lock);
       int bytes_written = file_write(find_fd(fd)->file, buffer, size);
+      lock_release(&file_lock);
       return bytes_written;
    }
    else {
@@ -234,12 +306,27 @@ int system_write(int fd, const void *buffer, unsigned size){
    }
 }
 
+/* Changes where the next byte to be read or written will be in the file */
 void system_seek(int fd, unsigned position) {
-  printf("sys_seek not implemented");
+  
+  struct file* file = find_fd(fd)->file;
+  
+  lock_acquire(&file_lock);
+  file_seek (file, (off_t)position);
+  lock_release(&file_lock);  
+  
 }
 
+/* Returns the next position to be read or written from the file */
 unsigned system_tell(int fd) {
-  printf("sys_tell not implemented");
+  
+  struct file* file = find_fd(fd)->file;
+  
+  lock_acquire(&file_lock);
+  unsigned position = (unsigned)file_tell (file);
+  lock_release(&file_lock);
+  
+  return position;
 }
 
 void system_close(int fd){
@@ -254,6 +341,11 @@ void system_close(int fd){
    }
 }
 
+
+/************** End of  implementations ********************/
+
+
+/* Start Helper Functions */
 bool verify_user_ptr(void *vaddr) {
 	bool isValid = 1;
 	if(is_user_vaddr(vaddr) && (vaddr < ((void*)LOWEST_USER_VADDR))){
@@ -263,3 +355,20 @@ bool verify_user_ptr(void *vaddr) {
 	return (isValid);
 }
 
+
+
+/* Retrieve arguments from stack */
+void get_args(struct intr_frame *f, int *args, int argc) {
+
+  int *argptr; // pointer to argument
+
+  for (int i = 0; i < argc; i++) {
+    argptr = (int*)f->esp + (4 * i);
+    if(verify_user_ptr((void *)argptr)) {
+      args[i] = *argptr; // put the contents of argument pointer into array or args
+    }
+    else {
+      // system_exit();
+    }
+  }
+}
