@@ -102,19 +102,22 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
 
   int callNum; // set up a local variable to hold the call number
-
+  int* ptr = (int*) pagedir_get_page(thread_current()->pagedir, f->esp);
   //Verify that the user provided virtual address is valid
   if(verify_user_ptr(f->esp)) {
-    // callNum = *((int*)f->esp); // get the call number
+  	  printf("pointer address: %p\n", f->esp);
+  	  printf("Data at esp: %d\n", *((int*)(f->esp + -1)));
+  	  printf("Physical Address:%p\n", ptr);
+  	  printf("Data at address: %d\n", *(ptr + 0));
 
-    callNum = get_user((uint8_t *)f->esp);
-
+    // callNum = get_user((uint8_t *)f->esp);
+    callNum = *(int *)f->esp;
   	// printf ("system call number: %d\n", callNum);
   	//Retrieve and handle the System call NUMBER fromt the User Stack
   	switch(callNum) {
   		case SYS_HALT:
   			system_halt();
-        break;
+  			break;
   		case SYS_EXIT:
         get_args(f, syscall_args, 1);
   			system_exit(syscall_args[0]);
@@ -137,7 +140,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   			break;
   		case SYS_OPEN:
         get_args(f, syscall_args, 1);
-        f->eax = system_open((char*)syscall_args[0]);//(const char *file);
+        f->eax = system_open((char*)syscall_args[0]);
   			break;
   		case SYS_FILESIZE:
         get_args(f, syscall_args, 1);
@@ -165,7 +168,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   			break;
 		default:
 			break;
-    }
+  	}
   }
   thread_exit ();
 }
@@ -179,7 +182,6 @@ void system_halt(void) {
 }
 
 void system_exit(int status) {
-    // printf("Status Number: %d\n", status);
     /* Terminates current user program and returns status to the kernel */
     thread_exit();
 }
@@ -197,6 +199,9 @@ int system_wait(pid_t pid) {
 
 bool system_create(const char *file, unsigned initial_size) {
   
+  
+  // need to check that file is a valid user address
+  
   lock_acquire(&file_lock);
   bool fileCreate = filesys_create (file, (off_t)initial_size);
   lock_release(&file_lock);
@@ -204,6 +209,8 @@ bool system_create(const char *file, unsigned initial_size) {
 }
 
 bool system_remove(const char *file) {
+  
+  // need to check file is valid user address
   
   lock_acquire(&file_lock);
   bool fileRemove = filesys_remove(file);
@@ -252,6 +259,7 @@ int system_filesize(int fd) {
 int system_read(int fd, void *buffer, unsigned size) {
 
   // If fd == 0, read from keyboard
+  lock_acquire(&file_lock);
   if (fd == STDIN_FILENO) {
     uint8_t *tmp_buffer = (uint8_t *) buffer;
     for(unsigned i = 0; i < size; i++) {
@@ -266,7 +274,6 @@ int system_read(int fd, void *buffer, unsigned size) {
     struct file* readFile = find_fd(fd)->file;
     
     if (readFile != NULL) {
-      lock_acquire(&file_lock);
       int bytesRead = file_read(readFile, buffer, size);
       lock_release(&file_lock);
       return bytesRead;
@@ -333,7 +340,9 @@ void system_close(int fd){
    if (find_fd(fd) != NULL){
       struct fd_elem *fde = find_fd(fd);
       // Close file
+      lock_acquire(&file_lock);
       file_close(fde->file);
+      lock_release(&file_lock);
       // Remove from open file list
       list_remove(&fde->elem);
       // Free memory
@@ -354,8 +363,6 @@ bool verify_user_ptr(void *vaddr) {
 
 	return (isValid);
 }
-
-
 
 /* Retrieve arguments from stack */
 void get_args(struct intr_frame *f, int *args, int argc) {
